@@ -6,9 +6,8 @@ from bs4 import BeautifulSoup
 from src.scrapers.common.client import create_session, fetch_soup
 from src.scrapers.common.utills import get_next_page_url, get_output_csv_path, get_project_root, save_to_csv
 
-# ====== CẤU HÌNH RIÊNG CỦA CAFELAND ======
 START_URL = "https://nhadat.cafeland.vn/nha-dat-ban-tai-tp-ho-chi-minh/"
-TARGET_COUNT = 12000     # Số lượng tin muốn thu thập
+TARGET_COUNT = 9000     # Số lượng tin muốn thu thập
 PAGE_DELAY = 1           # Thời gian nghỉ giữa các trang (giây)
 
 PROJECT_ROOT = get_project_root(__file__, levels_up=3)
@@ -16,7 +15,7 @@ CSV_PATH = get_output_csv_path(PROJECT_ROOT, "cafeland", "listing.csv")
 
 
 def extract_listings(soup: BeautifulSoup, page_url: str):
-    """Lấy danh sách (tiêu đề, link) từ trang hiện tại."""
+    # Lấy danh sách tiêu đề, link
     results = []
     for a in soup.select("a.realTitle"):
         title = a.get_text(strip=True)
@@ -27,7 +26,7 @@ def extract_listings(soup: BeautifulSoup, page_url: str):
 
 
 def scrape_listing(target_count: int):
-    """Duyệt qua các trang danh sách cho đến khi đủ số tin cần thu thập."""
+    # Duyệt qua các trang danh sách
     session = create_session()
     seen_links = set()
     collected: list[tuple[str, str]] = []
@@ -36,7 +35,7 @@ def scrape_listing(target_count: int):
     while url and len(collected) < target_count:
         soup = fetch_soup(session, url)
         if soup is None:
-            print(f"Dừng lại, không tải được trang: {url}")
+            print(f"Dừng, không tải được trang: {url}")
             break
 
         page_listings = []

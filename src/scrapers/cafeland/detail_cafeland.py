@@ -11,7 +11,7 @@ from src.scrapers.common.utills import (
 )
  
 # =========================
-# 1. CẤU HÌNH
+# 1. Cấu hình
 # =========================
  
 TARGET_COUNT = 1200     # Số tin muốn cào chi tiết
@@ -29,7 +29,7 @@ FIELDS = [
  
  
 # =========================
-# 2. LẤY DỮ LIỆU (selector riêng của Cafeland)
+# 2. Lấy dữ liệu
 # =========================
  
 def get_title(soup):
@@ -37,7 +37,7 @@ def get_title(soup):
  
  
 def get_info(soup, label):
-    """Lấy 'Giá bán' hoặc 'Diện tích' từ khối thông tin chính."""
+    # Lấy 'Giá bán' hoặc 'Diện tích'
     items = soup.select(".reals-info-group .col-item")
     for item in items:
         name = get_text(item, ".infor-note")
@@ -47,13 +47,13 @@ def get_info(soup, label):
  
  
 def get_architecture(soup, css_class):
-    """Lấy thông tin trong phần kiến trúc (số phòng ngủ, hướng nhà,...)."""
+    # Lấy thông tin trong phần kiến trúc
     selector = f".reals-house-item.{css_class} .value-item"
     return get_text(soup, selector)
  
  
 def get_location(soup):
-    """Lấy vị trí (ưu tiên các link địa danh, fallback sang text thường)."""
+    # Lấy vị trí
     block = soup.select_one(".reales-location .info") or soup.select_one(".reales-location")
     if not block:
         return None
@@ -71,7 +71,7 @@ def get_location(soup):
  
  
 def get_description(soup):
-    """Lấy mô tả, bỏ tiêu đề 'Thông tin mô tả' nếu có."""
+    # Lấy mô tả, bỏ tiêu đề 'Thông tin mô tả'
     text = get_text(soup, ".reals-description")
     if not text:
         return None
@@ -79,11 +79,10 @@ def get_description(soup):
  
  
 # =========================
-# 3. CÀO 1 TIN
+# 3. Cào 1 tin
 # =========================
  
 def scrape_detail(session, url):
-    """Cào toàn bộ thông tin chi tiết của 1 tin."""
     soup = fetch_soup(session, url)
     if soup is None:
         return None
@@ -105,7 +104,7 @@ def scrape_detail(session, url):
  
  
 # =========================
-# 4. MAIN
+# 4. Hàm chính
 # =========================
  
 def main(target_count: int = TARGET_COUNT):
@@ -123,7 +122,6 @@ def main(target_count: int = TARGET_COUNT):
         if result:
             data.append(result)
  
-            # Lưu ngay tin vừa cào được
             save_dict_rows_to_csv(
                 [result],
                 OUTPUT_FILE,
