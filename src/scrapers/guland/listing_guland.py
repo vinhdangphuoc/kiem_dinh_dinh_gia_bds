@@ -1,30 +1,18 @@
-from typing import List, Tuple
-from urllib.parse import urljoin
-
+from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
+from src.scrapers.common.pipeline import run_listing
+from src.scrapers.common.utils import get_output_csv_path, get_project_root
 
-from src.scrapers.common.client import create_session, fetch_soup
-from src.scrapers.common.utills import (
-    get_output_csv_path,
-    get_project_root,
-    save_to_csv,
-)
-
-# ============================================================
-# Cấu hình
-# ============================================================
 START_URL = "https://guland.vn/mua-ban-bat-dong-san-tp-ho-chi-minh"
 PROJECT_ROOT = get_project_root(__file__, levels_up=3)
-CSV_PATH = get_output_csv_path(PROJECT_ROOT, "guland", "listing.csv")
+CSV_PATH = get_output_csv_path(PROJECT_ROOT, "guland", "listing_guland.csv")
 
 
-# ============================================================
-# Lấy utills
-# ============================================================
+# Trích tiêu đề và URL từ một trang danh sách.
 def extract_listings(soup: BeautifulSoup, page_url: str):
     results = []
     links = soup.select('a[href*="/post/"]')
-    
+
     for a in links:
         href = a.get("href")
         title = a.get_text(" ", strip=True)
@@ -37,70 +25,22 @@ def extract_listings(soup: BeautifulSoup, page_url: str):
 
     return results
 
-
-# ============================================================
-# Thu thập dữ liệu
-# ============================================================
-def scrape_listing(target_count: int):
-    session = create_session()
-    listings = []
-    seen_links = set()
-    page = 0
-
-    while len(listings) < target_count:
-        page_url = START_URL if page == 0 else f"{START_URL}?page={page + 1}"
-
-        soup = fetch_soup(session, page_url)
-
-        if soup is None:
-            print("Không tải được trang")
-            break
-
-        page_listings = extract_listings(soup, page_url)
-
-        if not page_listings:
-            print("[!] Không tìm thấy tin")
-            break
-
-        rows = []
-
-        for title, link in page_listings:
-            if link in seen_links:
-                continue
-
-            seen_links.add(link)
-            stt = len(listings) + 1
-
-            listings.append((stt, title, link))
-            rows.append((title, link))
-
-            print(f"{stt}. {title}")
-            print(f"   {link}")
-
-            if len(listings) >= target_count:
-                break
-
-        if rows:
-            start_index = len(listings) - len(rows) + 1
-            save_to_csv(rows, CSV_PATH, start_index=start_index)
-
-        page += 1
-
-    print(f"\n{'=' * 60}")
-    print(f"Hoàn tất: {len(listings)} tin")
-
-    return listings
+def next_page_url(soup, page_url):
+    page = int(parse_qs(urlsplit(page_url).query).get("page", ["1"])[0])
+    return f"{START_URL}?page={page + 1}"
 
 
-# ============================================================
-# MAIN
-# ============================================================
-def main(target_count):
-    if CSV_PATH.exists():
-        CSV_PATH.unlink()
+def scrape_listing(target_count: int, *, restart=False):
+    return run_listing(
+        START_URL, CSV_PATH, extract_listings, next_page_url, target_count,
+        site="guland", restart=restart,
+    )
 
-    scrape_listing(target_count)
+
+def main(target_count: int, *, restart_listing=False):
+    return scrape_listing(target_count, restart=restart_listing)
 
 
 if __name__ == "__main__":
-    main()
+    from main import main as run_cli
+    raise SystemExit(run_cli(default_site="guland", default_stage="listing"))

@@ -1,41 +1,22 @@
 import re
-import time
- 
-from src.scrapers.common.client import create_session, fetch_soup
-from src.scrapers.common.utills import (
+
+from src.scrapers.common.pipeline import fetch_detail, run_details
+from src.scrapers.common.utils import (
     get_output_csv_path,
     get_project_root,
     get_text,
-    load_column_from_csv,
-    save_dict_rows_to_csv,
 )
- 
-# =========================
-# 1. Cấu hình
-# =========================
- 
-TARGET_COUNT = 1200     # Số tin muốn cào chi tiết
-REQUEST_DELAY = 1       # Nghỉ giữa các request (giây)
- 
+
 PROJECT_ROOT = get_project_root(__file__, levels_up=3)
-INPUT_FILE = get_output_csv_path(PROJECT_ROOT, "cafeland", "listing.csv")
-OUTPUT_FILE = get_output_csv_path(PROJECT_ROOT, "cafeland", "detail.csv")
- 
-FIELDS = [
-    "title", "price", "area", "location", "property_type",
-    "bedrooms", "bathrooms", "direction", "floors",
-    "legal_status", "description", "url",
-]
- 
- 
-# =========================
-# 2. Lấy dữ liệu
-# =========================
- 
+INPUT_FILE = get_output_csv_path(PROJECT_ROOT, "cafeland", "listing_cafeland.csv")
+OUTPUT_FILE = get_output_csv_path(PROJECT_ROOT, "cafeland", "detail_cafeland.csv")
+FAILED_FILE = get_output_csv_path(PROJECT_ROOT, "cafeland", "failed_urls.csv")
+
+
 def get_title(soup):
     return get_text(soup, "h1.head-title")
- 
- 
+
+
 def get_info(soup, label):
     # Lấy 'Giá bán' hoặc 'Diện tích'
     items = soup.select(".reals-info-group .col-item")
@@ -44,49 +25,46 @@ def get_info(soup, label):
         if name == label:
             return get_text(item, ".infor-data")
     return None
- 
- 
+
+
 def get_architecture(soup, css_class):
     # Lấy thông tin trong phần kiến trúc
     selector = f".reals-house-item.{css_class} .value-item"
     return get_text(soup, selector)
- 
- 
+
+
 def get_location(soup):
-    # Lấy vị trí
-    block = soup.select_one(".reales-location .info") or soup.select_one(".reales-location")
-    if not block:
+    # Chỉ lấy khối bên trái; mã tài sản và ngày đăng nằm bên phải.
+    block = soup.select_one(".reales-location > .col-left")
+    if block is None:
         return None
- 
-    # Ưu tiên lấy text từ các thẻ <a> (link địa danh: quận/huyện, đường...)
-    link_texts = [a.get_text(" ", strip=True) for a in block.select("a")]
-    link_texts = [t for t in link_texts if t]
-    if link_texts:
-        return ", ".join(link_texts)
- 
-    # Không có link thì lấy text thô của cả block, bỏ tiền tố "Vị trí:"
+
     text = block.get_text(" ", strip=True)
     text = re.sub(r"^Vị trí\s*:?\s*", "", text, flags=re.IGNORECASE)
+    # Nút Lưu tin cũng nằm trong khối bên trái.
+    text = re.split(r"\bLưu tin\b", text, maxsplit=1, flags=re.IGNORECASE)[0]
     return text.strip() or None
- 
- 
+
+
 def get_description(soup):
     # Lấy mô tả, bỏ tiêu đề 'Thông tin mô tả'
     text = get_text(soup, ".reals-description")
     if not text:
         return None
     return re.sub(r"^Thông tin mô tả\s*", "", text, flags=re.IGNORECASE).strip()
- 
- 
-# =========================
-# 3. Cào 1 tin
-# =========================
- 
-def scrape_detail(session, url):
-    soup = fetch_soup(session, url)
-    if soup is None:
-        return None
- 
+
+
+def get_published_at_raw(soup):
+    # Lấy ngày đăng của tin chính theo cấu trúc HTML CafeLand.
+    for element in soup.select(".reales-location .col-right .infor i"):
+        text = element.get_text(" ", strip=True)
+        match = re.match(r"^\s*Ngày đăng\s*:\s*(.+?)\s*$", text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def parse_detail(soup, url):
     return {
         "title": get_title(soup),
         "price": get_info(soup, "Giá bán"),
@@ -100,41 +78,22 @@ def scrape_detail(session, url):
         "legal_status": get_architecture(soup, "opt-phaply"),
         "description": get_description(soup),
         "url": url,
+        "published_at_raw": get_published_at_raw(soup),
+        "updated_at_raw": None,
     }
- 
- 
-# =========================
-# 4. Hàm chính
-# =========================
- 
-def main(target_count: int = TARGET_COUNT):
-    urls = load_column_from_csv(INPUT_FILE, "Link", limit=target_count)
-    print(f"Có {len(urls)} URL cần cào.")
- 
-    session = create_session()
-    data = []
- 
-    for index, url in enumerate(urls, start=1):
-        print(f"{index}. [{url}]")
- 
-        result = scrape_detail(session, url)
- 
-        if result:
-            data.append(result)
- 
-            save_dict_rows_to_csv(
-                [result],
-                OUTPUT_FILE,
-                FIELDS,
-                append=True
-            )
- 
-        time.sleep(REQUEST_DELAY)
- 
-    print("=" * 60)
-    print(f"Đã cào {len(data)} tin.")
- 
- 
+
+
+def scrape_detail(session, url):
+    return fetch_detail(session, url, parse_detail)
+
+
+def main(target_count: int, *, retry_errors=False):
+    return run_details(
+        INPUT_FILE, OUTPUT_FILE, FAILED_FILE, scrape_detail, target_count,
+        site="cafeland", retry_errors=retry_errors,
+    )
+
+
 if __name__ == "__main__":
-    main()
- 
+    from main import main as run_cli
+    raise SystemExit(run_cli(default_site="cafeland", default_stage="detail"))

@@ -1,38 +1,17 @@
-import time
-from typing import Dict, Optional, Tuple, List
-
 from bs4 import BeautifulSoup
-
-from src.scrapers.common.client import create_session, fetch_soup
-from src.scrapers.common.utills import (
+from src.scrapers.common.pipeline import fetch_detail, run_details
+from src.scrapers.common.utils import (
+    clean_text,
     get_output_csv_path,
     get_project_root,
-    load_column_from_csv,
-    save_dict_rows_to_csv,
-    clean_text,
     get_text,
 )
 
-# ============================================================
-# CẤU HÌNH
-# ============================================================
-TARGET_COUNT = 1000
-REQUEST_DELAY = 1
-
 PROJECT_ROOT = get_project_root(__file__, levels_up=3)
-INPUT_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "listing.csv")
-OUTPUT_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "detail.csv")
+INPUT_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "listing_guland.csv")
+OUTPUT_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "detail_guland.csv")
+FAILED_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "failed_urls.csv")
 
-FIELDS = [
-    "title", "price", "area", "location", "property_type",
-    "bedrooms", "bathrooms", "direction", "floors",
-    "legal_status", "description", "url",
-]
-
-
-# ============================================================
-# 2. Lấy dữ liệu
-# ============================================================
 
 def get_title(soup: BeautifulSoup):
     # Xác nhận: <h1 class="dtl-tle">
@@ -64,7 +43,7 @@ def parse_label_value(item):
 
 
 def get_property_info(soup: BeautifulSoup):
-    info: Dict[str, str] = {}
+    info: dict[str, str] = {}
     for item in soup.select(".s-dtl-inf"):
         label, value = parse_label_value(item)
         if label and value:
@@ -72,7 +51,7 @@ def get_property_info(soup: BeautifulSoup):
     return info
 
 
-def get_info_value(info: Dict[str, str], labels: List[str]):
+def get_info_value(info: dict[str, str], labels: list[str]):
     for label in labels:
         if label in info:
             return info[label]
@@ -83,7 +62,7 @@ def get_info_value(info: Dict[str, str], labels: List[str]):
     return None
 
 
-def get_property_type(soup: BeautifulSoup, info: Dict[str, str]):
+def get_property_type(soup: BeautifulSoup, info: dict[str, str]):
     pill_text = get_text(soup, ".dtl-inf__pills")
     if pill_text:
         return pill_text
@@ -94,18 +73,18 @@ def get_description(soup: BeautifulSoup):
     return get_text(soup, ".dtl-inf__dsr")
 
 
-# ============================================================
-# 3. Cào 1 tin
-# ============================================================
+def get_updated_at_raw(soup: BeautifulSoup):
+    # Giữ nguyên thời gian cập nhật tương đối do Guland hiển thị.
+    for element in soup.select(".dtl-main .dtl-stl .dtl-stl__row span"):
+        text = clean_text(element.get_text(" ", strip=True))
+        if text and text.lower().startswith("cập nhật"):
+            return text
+    return None
 
-def scrape_detail(session, url: str):
-    soup = fetch_soup(session, url)
-    if soup is None:
-        return None
 
+def parse_detail(soup, url):
     price, area = get_price_and_area(soup)
     info = get_property_info(soup)
-
     return {
         "title": get_title(soup),
         "price": price,
@@ -119,33 +98,22 @@ def scrape_detail(session, url: str):
         "legal_status": get_info_value(info, ["Tình trạng sổ", "Pháp lý", "Loại sổ"]),
         "description": get_description(soup),
         "url": url,
+        "published_at_raw": None,
+        "updated_at_raw": get_updated_at_raw(soup),
     }
 
 
-# ============================================================
-# 4. MAIN
-# ============================================================
+def scrape_detail(session, url):
+    return fetch_detail(session, url, parse_detail)
 
-def main(target_count: int = TARGET_COUNT):
-    urls = load_column_from_csv(INPUT_FILE, "Link", limit=target_count)
-    print(f"Có {len(urls)} URL cần cào.")
 
-    session = create_session()
-    data = []
-
-    for index, url in enumerate(urls, start=1):
-        print(f"{index}. [{url}]")
-        result = scrape_detail(session, url)
-
-        if result:
-            data.append(result)
-            save_dict_rows_to_csv([result], OUTPUT_FILE, FIELDS, append=True)
-
-        time.sleep(REQUEST_DELAY)
-
-    print("=" * 60)
-    print(f"Đã cào {len(data)} tin.")
+def main(target_count: int, *, retry_errors=False):
+    return run_details(
+        INPUT_FILE, OUTPUT_FILE, FAILED_FILE, scrape_detail, target_count,
+        site="guland", retry_errors=retry_errors,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    from main import main as run_cli
+    raise SystemExit(run_cli(default_site="guland", default_stage="detail"))
