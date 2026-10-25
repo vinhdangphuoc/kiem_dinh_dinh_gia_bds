@@ -17,7 +17,7 @@ DEFAULT_HEADERS = {
 DEFAULT_TIMEOUT = 60
 DEFAULT_RETRIES = 3       # tổng số lần thử, gồm lần đầu
 DEFAULT_RETRY_DELAY = 3   # giây; nhân đôi sau mỗi lần thử
-REQUEST_INTERVAL = 1.0    # giây tối thiểu giữa hai request tới cùng một trang
+REQUEST_INTERVAL = 0.5    # giây tối thiểu giữa hai request tới cùng một trang
 MAX_RETRY_WAIT = 300      # không chờ quá 5 phút dù server yêu cầu
 MAX_REDIRECTS = 3
 

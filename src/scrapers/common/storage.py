@@ -89,7 +89,7 @@ class CSVStore:
 
 
 class FailureLedger:
-    """Mỗi URL một dòng: lý do gần nhất và số lần thất bại (attempts)."""
+    """URL chưa cào thành công: lý do gần nhất và số lượt thất bại."""
 
     def __init__(self, path):
         self.path = Path(path)
@@ -118,6 +118,12 @@ class FailureLedger:
             "attempts": self.attempts(url) + 1,
         }
         self.dirty = True
+
+    def resolve(self, url):
+        """Gỡ URL đã lưu thành công khỏi danh sách lỗi hiện hành."""
+        if url in self.records:
+            del self.records[url]
+            self.dirty = True
 
     def commit(self):
         if self.dirty:
