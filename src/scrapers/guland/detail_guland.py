@@ -14,7 +14,6 @@ FAILED_FILE = get_output_csv_path(PROJECT_ROOT, "guland", "failed_urls.csv")
 
 
 def get_title(soup: BeautifulSoup):
-    # Xác nhận: <h1 class="dtl-tle">
     return get_text(soup, "h1.dtl-tle")
 
 

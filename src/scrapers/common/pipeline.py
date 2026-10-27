@@ -2,16 +2,21 @@
 
 from pathlib import Path
 
-from .client import FetchError, STOP_REASONS, create_session, fetch_soup, is_blocked_page, same_origin
+from .client import FetchError, STOP_REASONS, create_session, fetch_soup, same_origin
 from .schema import DETAIL_FIELDS, LISTING_FIELDS
 from .storage import CSVStore, FailureLedger, load_state, save_state
 from .utils import load_column_from_csv, now_iso
 
+# 20 trang/tin liên tiếp không tiêu đề là dấu hiệu selector đã đổi; dừng để kiểm tra.
 MAX_CONSECUTIVE_NO_TITLE = 20
 CORE_FIELDS = ("price", "area", "location")
+# 10 tin liên tiếp thiếu cùng một trường: cảnh báo sớm nhưng vẫn giữ raw.
 MISSING_CORE_WARNING_AFTER = 10
+# 5 URL liên tiếp lỗi mạng/429/5xx sau retry: tạm dừng thay vì tiếp tục gọi dồn.
 MAX_CONSECUTIVE_FETCH_ERRORS = 5
+# Mỗi URL lỗi tối đa 3 lượt chạy; --retry-errors cho phép thử lại có chủ đích.
 MAX_FAILED_RUNS = 3
+# Ghi batch mỗi 20 lượt để giảm I/O và giới hạn dữ liệu chưa ghi nếu gián đoạn.
 COMMIT_EVERY = 20
 
 def print_banner(site, stage):
@@ -22,8 +27,6 @@ def fetch_detail(session, url, parse_detail):
         soup = fetch_soup(session, url, raise_on_error=True)
         if soup is None:
             return None, "network"
-        if is_blocked_page(soup):
-            return None, "blocked"
         row = parse_detail(soup, url)
         if not row.get("title"):
             return None, "no_title"
@@ -203,10 +206,6 @@ def run_listing(start_url, csv_path, extract_listings, next_page_url, target_cou
                 if soup is None:
                     summary["stop_reason"] = "network"
                     print(f"[Dừng listing] {site}: không tải được trang: {url}", flush=True)
-                    break
-                if is_blocked_page(soup):
-                    summary["stop_reason"] = "blocked"
-                    print(f"[Dừng listing] {site}: bị chặn: {url}", flush=True)
                     break
 
                 try:

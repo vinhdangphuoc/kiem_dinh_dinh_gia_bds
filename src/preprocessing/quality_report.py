@@ -493,7 +493,7 @@ def save_outputs(df, processed_dir, docs_dir, repeats=3):
                 read_seconds = time.perf_counter() - start
             except ImportError as error:
                 raise ImportError(
-                    "Cài đủ requirements-bt2.txt để xuất và so sánh cả bốn định dạng"
+                    "Cài đủ requirements.txt để xuất và so sánh cả bốn định dạng"
                 ) from error
             verify_round_trip(df, loaded, label)
             trials.append(

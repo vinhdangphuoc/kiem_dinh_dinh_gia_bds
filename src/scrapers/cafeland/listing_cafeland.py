@@ -8,9 +8,7 @@ PROJECT_ROOT = get_project_root(__file__, levels_up=3)
 CSV_PATH = get_output_csv_path(PROJECT_ROOT, "cafeland", "listing_cafeland.csv")
 
 
-# Trích tiêu đề và URL từ một trang danh sách.
 def extract_listings(soup: BeautifulSoup, page_url: str):
-    # Lấy danh sách tiêu đề, link
     results = []
     for a in soup.select("a.realTitle"):
         title = a.get_text(strip=True)

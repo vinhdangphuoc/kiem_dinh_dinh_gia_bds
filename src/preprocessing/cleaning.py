@@ -9,9 +9,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Ngưỡng kiểm tra thực nghiệm cho tập tin BĐS hỗn hợp, không phải mức giá/diện tích theo luật.
+# Giá 0,1–2.000 tỷ: chặn lỗi đơn vị và giá nhập cực nhỏ/lớn, vẫn giữ tài sản công nghiệp đắt.
 PRICE_MIN_VND, PRICE_MAX_VND = 100_000_000, 2_000_000_000_000
+# Diện tích 8–1.000.000 m²: đánh dấu số đo khó hợp lý; vẫn giữ nguyên dòng raw.
 AREA_MIN_M2, AREA_MAX_M2 = 8, 1_000_000
+# Đơn giá 0,05–1.000 triệu/m²: phát hiện sai đơn vị; không kết luận tin gian lận.
 PPM2_MIN_VND, PPM2_MAX_VND = 50_000, 1_000_000_000
+# 0–50 phòng, 1–60 tầng: chặn số do đọc nhầm; 0 phòng có thể áp dụng cho đất.
 ROOM_MAX, FLOOR_MIN, FLOOR_MAX = 50, 1, 60
 
 EXTRACTION_FIELDS = ["bedrooms", "bathrooms", "floors", "district", "direction", "legal_status_group"]
@@ -499,14 +504,7 @@ def normalize_direction(value):
     return DIRECTION_LABELS.get(re.sub(r"\s+", " ", text).strip(), np.nan)
 
 
-def clean_dataframe(df_raw: pd.DataFrame, source_name: str) -> pd.DataFrame:
-    """Chuẩn hóa một nguồn, giữ dòng và raw; ghi rõ các trường được phép bổ sung."""
-    df = df_raw.copy().reset_index(drop=True)
-    issues = pd.Series("", index=df.index)
-
-    def note(mask, text):
-        issues.loc[mask.fillna(False)] += text + "; "
-
+def _normalize_price_area(df, note):
     df["area_m2"] = df.area.map(parse_area)
     usable_area = df.area_m2.where(df.area_m2.between(AREA_MIN_M2, AREA_MAX_M2))
     parsed = [
@@ -546,6 +544,9 @@ def clean_dataframe(df_raw: pd.DataFrame, source_name: str) -> pd.DataFrame:
         & np.isclose(price_number, title_number),
         "Đơn vị giá khác tiêu đề",
     )
+
+
+def _normalize_location(df, note):
     # Chỉ bỏ metadata khi phân tích địa chỉ; location_raw sau đó vẫn giữ nguyên.
     location_clean = df.location.str.replace(
         r"\s*Lưu tin.*$", "", regex=True
@@ -576,6 +577,18 @@ def clean_dataframe(df_raw: pd.DataFrame, source_name: str) -> pd.DataFrame:
         )
     )
     note(multiple_wards, "Địa chỉ có nhiều tên phường/xã")
+
+
+def clean_dataframe(df_raw: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    """Chuẩn hóa một nguồn, giữ dòng và raw; ghi rõ các trường được phép bổ sung."""
+    df = df_raw.copy().reset_index(drop=True)
+    issues = pd.Series("", index=df.index)
+
+    def note(mask, text):
+        issues.loc[mask.fillna(False)] += text + "; "
+
+    _normalize_price_area(df, note)
+    _normalize_location(df, note)
     for column in ["bedrooms", "bathrooms", "floors"]:
         original = df[column].copy()
         df[column] = df[column].map(parse_count_field)
@@ -622,48 +635,7 @@ def clean_dataframe(df_raw: pd.DataFrame, source_name: str) -> pd.DataFrame:
     return df
 
 
-def extract_description_features(description, property_type_group="", fields=None):
-    """Trả về {cột: (giá trị, đoạn mô tả)}. Mơ hồ thì không trả ứng viên.
-
-    Không lấy giá/diện tích từ mô tả. Không cộng số phòng theo tầng.
-    Tên quận giữ cách gọi trong tin, không ánh xạ địa giới hành chính hiện tại.
-    """
-    if not isinstance(description, str):
-        return {}
-    original = unicodedata.normalize("NFC", description)
-    text = _strip_accents_lower(original)
-    fields = set(EXTRACTION_FIELDS if fields is None else fields)
-    # Tin giỏ hàng/nhiều căn không đảm bảo các thuộc tính cùng chỉ một BĐS.
-    if re.search(
-        r"gio hang|quy can|bang gia.*tung loai|\bcan 1\s*(?:pn|phong ngu).*\bcan [23]\s*(?:pn|phong ngu)",
-        text,
-    ):
-        return {}
-    if re.search(r"\b1[,.)].*\b2[,.)]\s*lo dat\b", text):
-        return {}
-    if len(set(re.findall(r"\b(?:can|lo)\s*(?:so\s*)?(\d{1,3})\b", text))) > 1:
-        return {}
-    candidates = {field: [] for field in EXTRACTION_FIELDS if field in fields}
-    blocked = set()
-    future = r"\b(?:khong|chua|du kien|se|sap|co the|duoc phep|toi da|it nhat|hon)\b"
-
-    def context(match):
-        # Không vượt qua dấu ngắt câu. Dấu chấm trong Q. / TP. vẫn được giữ.
-        start = max(text.rfind(ch, 0, match.start()) for ch in "\n;!?•●✅") + 1
-        dot = text.rfind(". ", 0, max(0, match.start() - 3))
-        if dot >= 0:
-            start = max(start, dot + 2)
-        return (
-            text[max(start, match.start() - 85) : match.start()],
-            text[match.end() : match.end() + 45],
-        )
-
-    def add(field, value, match):
-        snippet = original[
-            max(0, match.start() - 70) : min(len(original), match.end() + 75)
-        ].strip()
-        candidates[field].append((value, snippet))
-
+def _extract_rooms(text, fields, property_type_group, blocked, context, add, future):
     land = property_type_group.startswith("Đất")
     for field, labels in [
         ("bedrooms", r"pn|phong ngu"),
@@ -705,6 +677,8 @@ def extract_description_features(description, property_type_group="", fields=Non
                 else:
                     add(field, value, match)
 
+
+def _extract_floors(text, fields, property_type_group, blocked, context, add, future):
     if "floors" in fields and property_type_group in HOUSE_GROUPS:
         if re.search(r"\b\d+\s*[-–/]\s*\d+\s*tang\b", text):
             blocked.add("floors")
@@ -747,6 +721,51 @@ def extract_description_features(description, property_type_group="", fields=Non
                 else:
                     add("floors", value, match)
 
+
+def extract_description_features(description, property_type_group="", fields=None):
+    """Trả về {cột: (giá trị, đoạn mô tả)}. Mơ hồ thì không trả ứng viên.
+
+    Không lấy giá/diện tích từ mô tả. Không cộng số phòng theo tầng.
+    Tên quận giữ cách gọi trong tin, không ánh xạ địa giới hành chính hiện tại.
+    """
+    if not isinstance(description, str):
+        return {}
+    original = unicodedata.normalize("NFC", description)
+    text = _strip_accents_lower(original)
+    fields = set(EXTRACTION_FIELDS if fields is None else fields)
+    # Tin giỏ hàng/nhiều căn không đảm bảo các thuộc tính cùng chỉ một BĐS.
+    if re.search(
+        r"gio hang|quy can|bang gia.*tung loai|\bcan 1\s*(?:pn|phong ngu).*\bcan [23]\s*(?:pn|phong ngu)",
+        text,
+    ):
+        return {}
+    if re.search(r"\b1[,.)].*\b2[,.)]\s*lo dat\b", text):
+        return {}
+    if len(set(re.findall(r"\b(?:can|lo)\s*(?:so\s*)?(\d{1,3})\b", text))) > 1:
+        return {}
+    candidates = {field: [] for field in EXTRACTION_FIELDS if field in fields}
+    blocked = set()
+    future = r"\b(?:khong|chua|du kien|se|sap|co the|duoc phep|toi da|it nhat|hon)\b"
+
+    def context(match):
+        # Không vượt qua dấu ngắt câu. Dấu chấm trong Q. / TP. vẫn được giữ.
+        start = max(text.rfind(ch, 0, match.start()) for ch in "\n;!?•●✅") + 1
+        dot = text.rfind(". ", 0, max(0, match.start() - 3))
+        if dot >= 0:
+            start = max(start, dot + 2)
+        return (
+            text[max(start, match.start() - 85) : match.start()],
+            text[match.end() : match.end() + 45],
+        )
+
+    def add(field, value, match):
+        snippet = original[
+            max(0, match.start() - 70) : min(len(original), match.end() + 75)
+        ].strip()
+        candidates[field].append((value, snippet))
+
+    _extract_rooms(text, fields, property_type_group, blocked, context, add, future)
+    _extract_floors(text, fields, property_type_group, blocked, context, add, future)
     if "direction" in fields:
         directions = r"dong nam|dong bac|tay nam|tay bac|dong|tay|nam|bac"
         # Hướng cửa chính được nêu rõ áp dụng cả nhà và căn hộ.
@@ -906,7 +925,7 @@ def merge_description_features(df):
 
 
 def apply_numeric_limits(df):
-    """Giữ dòng, đánh dấu ngoại ngưỡng; đơn giá dùng np.divide an toàn."""
+    """Giữ dòng, đánh dấu và đặt NaN ngoài ngưỡng; đơn giá dùng np.divide an toàn."""
     df = df.copy()
     for column, lower, upper in [
         ("price_vnd", PRICE_MIN_VND, PRICE_MAX_VND),

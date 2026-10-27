@@ -18,7 +18,6 @@ def get_title(soup):
 
 
 def get_info(soup, label):
-    # Lấy 'Giá bán' hoặc 'Diện tích'
     items = soup.select(".reals-info-group .col-item")
     for item in items:
         name = get_text(item, ".infor-note")
@@ -28,7 +27,6 @@ def get_info(soup, label):
 
 
 def get_architecture(soup, css_class):
-    # Lấy thông tin trong phần kiến trúc
     selector = f".reals-house-item.{css_class} .value-item"
     return get_text(soup, selector)
 
@@ -47,7 +45,6 @@ def get_location(soup):
 
 
 def get_description(soup):
-    # Lấy mô tả, bỏ tiêu đề 'Thông tin mô tả'
     text = get_text(soup, ".reals-description")
     if not text:
         return None
